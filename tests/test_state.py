@@ -102,6 +102,50 @@ def test_same_label_reinforces_and_clears_pending() -> None:
     assert snapshot.confidence == pytest.approx(0.7 * 0.5 + 0.3 * 0.70)
 
 
+def test_same_label_below_switch_does_not_reinforce_or_clear_pending() -> None:
+    state = StickyState(
+        DebounceConfig(
+            min_confidence=0.45,
+            switch_confidence=0.60,
+            immediate_confidence=0.99,
+            consecutive_turns=2,
+        )
+    )
+    state.update(_hit("frustrated", 0.80))
+    confidence = state.confidence
+    turns = state.turns_in_state
+    snapshot = state.update(_hit("calm", 0.55))
+    assert snapshot.reason == "below_switch_confidence"
+    assert snapshot.emotion == "calm"
+    assert snapshot.pending_emotion == "frustrated"
+    assert snapshot.pending_count == 1
+    assert snapshot.confidence == confidence
+    assert state.confidence == confidence
+    assert state.turns_in_state == turns + 1
+
+
+def test_below_min_confidence_ignores_the_whole_tick() -> None:
+    state = StickyState(
+        DebounceConfig(
+            min_confidence=0.45,
+            switch_confidence=0.60,
+            immediate_confidence=0.99,
+            consecutive_turns=2,
+        )
+    )
+    state.update(_hit("frustrated", 0.80))
+    confidence = state.confidence
+    turns = state.turns_in_state
+    snapshot = state.update(_hit("calm", 0.10))
+    assert snapshot.reason == "below_min_confidence"
+    assert snapshot.switched is False
+    assert snapshot.pending_emotion == "frustrated"
+    assert snapshot.pending_count == 1
+    assert state.confidence == confidence
+    assert state.turns_in_state == turns
+    assert state.pending_emotion == "frustrated"
+
+
 def test_invalid_thresholds_raise() -> None:
     with pytest.raises(ValueError):
         DebounceConfig(

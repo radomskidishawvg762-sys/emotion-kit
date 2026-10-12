@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -33,3 +35,15 @@ def test_cli_mock_demo_completes() -> None:
     assert "mem-release-checklist" in output
     assert "模拟回复" in output
     assert "OPENAI_API_KEY" not in completed.stderr
+
+
+def test_interactive_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
+    from examples.cli_demo import _interactive
+    from emotion_kit import build_orchestrator
+
+    def _raise(_prompt: str = "") -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", _raise)
+    orchestrator = build_orchestrator(mode="rule", force_mock=True)
+    assert _interactive(orchestrator, verbose=False) == 0

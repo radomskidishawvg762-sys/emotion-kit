@@ -30,6 +30,21 @@ def test_rule_detects_each_clear_state(detector: Detector) -> None:
         assert detection.evidence
 
 
+def test_bu_kaixin_is_not_excited(detector: Detector) -> None:
+    assert detector.detect_rule("我不开心").emotion != "excited"
+    assert detector.detect_rule("不太好了").emotion != "excited"
+    happy = detector.detect_rule("我很开心")
+    assert happy.emotion == "excited"
+    assert happy.confidence >= 0.90
+
+
+def test_broad_patterns_do_not_immediate_switch(detector: Detector) -> None:
+    for text in ("终于", "谢谢", "ok", "没事", "还好", "OK"):
+        detection = detector.detect_rule(text)
+        assert detection.confidence < 0.90
+        assert detection.emotion != "excited"
+
+
 def test_english_keywords(detector: Detector) -> None:
     assert detector.detect_rule("I feel ANXIOUS about the deadline").emotion == "anxious"
     assert detector.detect_rule("I am fine, thanks").emotion == "calm"

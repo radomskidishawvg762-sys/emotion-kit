@@ -93,18 +93,39 @@ class StickyState:
         self.pending_emotion: Emotion | None = None
         self.pending_count: int = 0
 
+    def propose(self, detection: Detection) -> StateSnapshot:
+        """Return the next snapshot without mutating this state."""
+
+        trial = StickyState(self.debounce, self.emotion)
+        trial.confidence = self.confidence
+        trial.turns_in_state = self.turns_in_state
+        trial.pending_emotion = self.pending_emotion
+        trial.pending_count = self.pending_count
+        return trial.update(detection)
+
+    def commit(self, snapshot: StateSnapshot) -> None:
+        """Apply a snapshot from :meth:`propose` after the turn succeeds."""
+
+        self.emotion = snapshot.emotion
+        self.confidence = snapshot.confidence
+        self.turns_in_state = snapshot.turns_in_state
+        self.pending_emotion = snapshot.pending_emotion
+        self.pending_count = snapshot.pending_count
+
     def update(self, detection: Detection) -> StateSnapshot:
         previous = self.emotion
+        if detection.confidence < self.debounce.min_confidence:
+            return self._snapshot(previous, switched=False, reason="below_min_confidence")
+
         if detection.emotion == self.emotion:
+            if detection.confidence < self.debounce.switch_confidence:
+                self.turns_in_state += 1
+                return self._snapshot(previous, switched=False, reason="below_switch_confidence")
             self.pending_emotion = None
             self.pending_count = 0
             self.turns_in_state += 1
             self.confidence = min(1.0, (0.7 * self.confidence) + (0.3 * detection.confidence))
             return self._snapshot(previous, switched=False, reason="reinforce")
-
-        if detection.confidence < self.debounce.min_confidence:
-            self.turns_in_state += 1
-            return self._snapshot(previous, switched=False, reason="below_min_confidence")
 
         if detection.confidence >= self.debounce.immediate_confidence:
             self._switch(detection)

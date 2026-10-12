@@ -1,12 +1,13 @@
 # Keyword / regex rules for the offline detector.
 # Confidence = best / (best + second + 0.08).
-# A single clear category lands near 0.93; a tie stays near 0.5 and will not switch state.
+# One clear category is about 0.93 and can immediate-switch.
+# A tie lands below switch_confidence, so it does not enter the consecutive band.
 version: 1
 emotions:
   calm:
-    - pattern: '平静|放松|还好|没事|稳住|谢谢|明白了|可以了|不急'
+    - pattern: '平静|放松|稳住|明白了|不急'
       weight: 1.0
-    - pattern: '\b(calm|relaxed|fine|okay|ok|thanks|got it)\b'
+    - pattern: '\b(calm|relaxed|fine|got it)\b'
       weight: 1.0
   anxious:
     - pattern: '焦虑|担心|紧张|不安|害怕|来不及|怎么办|会不会|慌'
@@ -19,7 +20,7 @@ emotions:
     - pattern: '\b(frustrated|annoyed|angry|stuck|useless|furious)\b'
       weight: 1.2
   excited:
-    - pattern: '兴奋|太棒|太好了|激动|开心|好耶|终于|期待|冲啊'
+    - pattern: '兴奋|太棒|(?<!不)太好了|激动|(?<!不)开心|好耶|冲啊'
       weight: 1.2
     - pattern: '\b(excited|awesome|amazing|pumped|yay)\b'
       weight: 1.2

@@ -13,11 +13,11 @@ v1 固定四个标签，每个都有完整策略包（`config/orchestration.yaml
 | 标签 | 中文 | 思考深度 | 工具策略 |
 | --- | --- | --- | --- |
 | `calm` | 平静 | 1 | allow: search, calculator, calendar, memory_lookup；max 4 |
-| `anxious` | 焦虑 | 3 | allow: search, memory_lookup, calculator；deny: send_message, code_exec, delete；max 2 |
+| `anxious` | 焦虑 | 2 | allow: search, memory_lookup, calculator；deny: send_message, code_exec, delete；max 2 |
 | `frustrated` | 受挫 | 2 | allow: search, memory_lookup；deny: send_message, delete, code_exec；max 2 |
 | `excited` | 兴奋 | 2 | allow: search, calculator, calendar, memory_lookup, draft；deny: delete；max 3 |
 
-思考深度是主模型调用次数：深度 1 只生成最终回复；深度 N 先做 N−1 轮内部草稿，再生成最终回复。中间件不执行工具。`ToolPolicy.allows(name)` 留给宿主拦截，同一份允许/拒绝列表和 `max_tool_calls` 会写进系统提示。
+思考深度是主模型调用次数：深度 1 只生成最终回复；深度 N 先做 N−1 轮内部草稿，再生成最终回复。后面的草稿和最终回复都会看到前面的草稿。中间件不执行工具。`ToolPolicy.allows(name)` 留给宿主拦截，同一份允许/拒绝列表和 `max_tool_calls` 会写进系统提示。
 
 ## 安装
 
@@ -47,6 +47,7 @@ pip install -e ".[dev]"
 | `EMOTION_KIT_MAIN_MODEL` | 主对话模型，优先于 `OPENAI_MODEL` | 同上 |
 | `EMOTION_KIT_DETECT_MODEL` | 分类模型，可以和主模型不同 | 主模型 |
 | `EMOTION_KIT_MODE` | `rule`、`llm` 或 `auto` | 配置文件里的 `auto` |
+| `EMOTION_KIT_TIMEOUT` | 真实接口的 HTTP 超时（秒） | `90` |
 | `EMOTION_KIT_CONFIG_DIR` | 配置目录 | 见下方查找顺序 |
 
 真实接口示例：
@@ -60,7 +61,7 @@ uv run python examples/cli_demo.py
 uv run python examples/cli_demo.py --interactive
 ```
 
-其它兼容服务同样设置 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY`。检测和主对话可以指向不同模型名，客户端是同一个。
+其它兼容服务同样设置 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY`。检测和主对话可以指向不同模型名。未单独指定检测模型时，如果传了带 `model` 的 `detect_client`，就用那个名字。超时、连接重置和其它 `OSError` 会变成 `LLMError`；超时以及 HTTP 429/502/503/504 最多再试 2 次（短退避），401 不重试。CLI 仍是一行 `error:` 后退出。
 
 不设置密钥时，Mock 适配器离线跑完检测、防抖、策略、记忆和多轮思考：
 
@@ -128,7 +129,7 @@ orchestrator = build_orchestrator(
 )
 ```
 
-有密钥时去掉 `force_mock=True` 即可走真实模型。检测客户端和主客户端可以分开传：`build_orchestrator(client=..., detect_client=...)`。
+有密钥时去掉 `force_mock=True` 即可走真实模型。检测客户端和主客户端可以分开传：`build_orchestrator(client=..., detect_client=...)`。没有显式 `detect_model` 时，用 `detect_client.model`（如果有）。最终回复若带 `usage`，在 `result.usage`。
 
 ## 架构
 
@@ -145,10 +146,10 @@ user message
 | 模块 | 职责 |
 | --- | --- |
 | `emotion_kit/detector.py` | 规则打分，或让分类模型返回 JSON |
-| `emotion_kit/state.py` | 粘滞状态。低置信度忽略；高置信度立即切换；中等置信度要连续出现 |
-| `emotion_kit/strategy.py` | 读取 YAML/JSON 策略包，支持目录和字段覆盖 |
-| `emotion_kit/memory.py` | 条目含 id、text、tags、metadata、可选 emotion affinity；按状态权重打分 |
-| `emotion_kit/adapters.py` | `OpenAICompatibleClient` 与离线 `MockClient` |
+| `emotion_kit/state.py` | 粘滞状态。低于 `min_confidence` 整轮忽略；高置信度立即切换；中等置信度要连续出现 |
+| `emotion_kit/strategy.py` | 读取 YAML/JSON 策略包，支持目录和字段覆盖。状态包里的未知字段会报错 |
+| `emotion_kit/memory.py` | 条目含 id、text、tags、metadata、可选 emotion affinity；按状态权重打分。中文标签按整段子串匹配 |
+| `emotion_kit/adapters.py` | `OpenAICompatibleClient` 与离线 `MockClient`。空 `content` 是 `LLMError`，不用 `reasoning_content` 当回复 |
 | `emotion_kit/pipeline.py` | 把上面五步串起来 |
 | `examples/cli_demo.py` | 脚本 / 交互演示 |
 
@@ -156,17 +157,19 @@ user message
 
 - `rule`：只做关键词和正则。中英模式都在 `config/rules.yaml`。
 - `llm`：向检测模型要一个 JSON 对象：`emotion`、`confidence`、`evidence`。
-- `auto`：规则结果足够清晰（有证据且置信度 ≥ `rule_accept_confidence`）就直接用。否则有客户端时再问分类模型；调用失败则退回规则结果。没有客户端时 `auto` 等于 `rule`。
+- `auto`：规则结果足够清晰（有证据且置信度 ≥ `rule_accept_confidence`）就直接用。否则再问分类模型；调用失败（含超时、空内容）则退回规则结果。`build_orchestrator` 总会挂上客户端：有密钥时是真实接口，否则是 Mock。因此走构建器时，`auto` 在规则不够清晰时一定会调用分类模型。只有单独构造 `Detector` 且不传入客户端时，`auto` 才等于纯规则。
 
-规则置信度是 `best / (best + second + 0.08)`。单一类别接近 0.93，两类打架会掉到 0.5 附近，从而触发防抖而不是每轮来回切。
+规则置信度是 `best / (best + second + 0.08)`。单一清晰类别可以到 0.90 以上并立即切换。两类关键词打架时分数会落到 `switch_confidence` 以下，不会进入连续计数。连续确认带（`switch_confidence` 到 `immediate_confidence`）主要留给分类模型给出的中等分数。
 
 ### 防抖
 
 默认值在 `orchestration.yaml` 的 `debounce`：
 
-- 低于 `min_confidence`（0.45）：忽略，不打断当前连续计数
+- 低于 `min_confidence`（0.45）：整轮忽略，不改当前标签、置信度、轮数或正在累计的候选
+- 与当前标签相同，且达到 `switch_confidence`：强化置信度，并清掉正在累计的其它标签
+- 与当前标签相同，但低于 `switch_confidence`：不强化，也不清掉候选
 - 达到 `immediate_confidence`（0.90）：立刻切换
-- 介于 `switch_confidence`（0.62）和立即阈值之间：同一新标签要连续出现 `consecutive_turns`（2）次才切换
+- 介于 `switch_confidence`（0.62）和立即阈值之间：同一新标签要连续出现 `consecutive_turns`（2）次才切换。规则冲突通常到不了这个区间；它主要接住分类模型的中等分数
 
 ### 记忆
 

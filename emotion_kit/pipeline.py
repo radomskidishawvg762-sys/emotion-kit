@@ -34,6 +34,7 @@ class TurnResult:
     deliberation_notes: tuple[str, ...]
     messages: tuple[Mapping[str, str], ...]
     model: str
+    usage: Mapping[str, Any] | None = None
 
 
 class Orchestrator:
@@ -101,7 +102,8 @@ class Orchestrator:
             store_history = False
 
         detection = self.detector.detect(text, active)
-        snapshot = self.state.update(detection)
+        # State and history stay put until every main-model call returns.
+        snapshot = self.state.propose(detection)
         strategy = self.strategies[snapshot.emotion]
         recalled = tuple(self.memory.recall(snapshot.emotion, text))
         notes: list[str] = []
@@ -150,7 +152,9 @@ class Orchestrator:
             deliberation_notes=tuple(notes),
             messages=tuple(final_messages),
             model=final.model,
+            usage=final.usage,
         )
+        self.state.commit(snapshot)
         if store_history:
             self.history.append({"role": "user", "content": text})
             self.history.append({"role": "assistant", "content": result.reply})
@@ -206,15 +210,21 @@ class Orchestrator:
             _memory_block(memories),
         ]
         if deliberation_round is not None:
+            if notes:
+                parts.append(
+                    "\n此前的内部草稿（吸收进这一轮思考，不要原样输出给用户）：\n"
+                    + _render_notes(notes)
+                )
             parts.append(
                 "\n这是内部思考草稿第 "
                 f"{deliberation_round}/{depth} 轮，不是给用户的最终回复。"
                 "只用一两句话写下下一步该怎么组织回答。不要问候用户。"
             )
         elif notes:
-            rendered = "\n".join(f"{index}. {note}" for index, note in enumerate(notes, start=1))
             parts.append(
-                f"\n思考深度为 {depth}。以下是内部草稿，吸收进最终回复，不要原样输出草稿标题：\n{rendered}"
+                "\n思考深度为 "
+                f"{depth}。以下是内部草稿，吸收进最终回复，不要原样输出草稿标题：\n"
+                + _render_notes(notes)
             )
             parts.append("用最终回复面对用户。不要声称你测量到了对方的真实情绪。")
         else:
@@ -247,7 +257,7 @@ def build_orchestrator(
         config = replace(config, detector=replace(config.detector, mode=chosen_mode))
 
     env_main = main_model or _env("EMOTION_KIT_MAIN_MODEL") or _env("OPENAI_MODEL")
-    env_detect = detect_model or _env("EMOTION_KIT_DETECT_MODEL")
+    explicit_detect = detect_model or _env("EMOTION_KIT_DETECT_MODEL")
     api_key = _env("OPENAI_API_KEY")
     base_url = _env("OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
@@ -275,7 +285,10 @@ def build_orchestrator(
         resolved_main = env_main or client.model
     else:
         resolved_main = env_main or "gpt-4o-mini"
-    resolved_detect = env_detect or resolved_main
+    if explicit_detect:
+        resolved_detect = explicit_detect
+    else:
+        resolved_detect = _client_model(detect_client) or resolved_main
 
     detector_llm = detect_client if detect_client is not None else client
     directory = config_dir
@@ -304,6 +317,10 @@ def build_orchestrator(
     )
 
 
+def _render_notes(notes: Sequence[str]) -> str:
+    return "\n".join(f"{index}. {note}" for index, note in enumerate(notes, start=1))
+
+
 def _memory_block(memories: Sequence[ScoredMemory]) -> str:
     if not memories:
         return "召回记忆：无。"
@@ -318,6 +335,15 @@ def _as_chat(message: Mapping[str, str]) -> ChatDict:
         "role": str(message.get("role", "user")),
         "content": str(message.get("content", "")),
     }
+
+
+def _client_model(client: LLMClient | None) -> str | None:
+    if client is None:
+        return None
+    model = getattr(client, "model", None)
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    return None
 
 
 def _env(name: str) -> str | None:
