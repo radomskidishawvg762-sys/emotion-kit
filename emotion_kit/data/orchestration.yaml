@@ -1,0 +1,121 @@
+# Behavioral strategy packs. Labels select reply strategy, thinking depth,
+# and tool policy. They are not a measurement of subjective emotion.
+version: 1
+
+base_system_prompt: |
+  你是一个对话策略执行器。系统给你的状态标签（平静 calm、焦虑 anxious、受挫 frustrated、兴奋 excited）
+  只用于选择表达策略、思考深度和工具权限，不是对用户主观情绪的识别结论或心理判断。
+  不要说“我检测到你感到……”，也不要给用户贴情绪诊断。
+  用用户使用的语言回复。事实不足时直接说明，不要编造。
+  You execute a reply strategy. State labels are orchestration controls, not claims about subjective emotion.
+
+debounce:
+  min_confidence: 0.45
+  switch_confidence: 0.62
+  immediate_confidence: 0.90
+  consecutive_turns: 2
+
+detector:
+  mode: auto
+  # At or above this rule confidence, auto mode keeps the rule result.
+  # Below it, auto asks the LLM classifier when a client is configured.
+  rule_accept_confidence: 0.72
+  default_emotion: calm
+  default_confidence: 0.34
+
+memory:
+  top_k: 3
+  # Coefficients do not have to sum to 1. This table does, so scores stay in 0–1
+  # when each component is normalized.
+  weights:
+    calm:
+      tag_overlap: 0.35
+      affinity: 0.25
+      recency: 0.40
+    anxious:
+      tag_overlap: 0.20
+      affinity: 0.60
+      recency: 0.20
+    frustrated:
+      tag_overlap: 0.25
+      affinity: 0.55
+      recency: 0.20
+    excited:
+      tag_overlap: 0.30
+      affinity: 0.45
+      recency: 0.25
+
+states:
+  calm:
+    label_zh: 平静
+    description: Steady pace, normal tool access, a single deliberation pass.
+    system_prompt_delta: |
+      当前编排状态：平静（calm）。
+      保持简洁、直接、信息密度高。不必过度安抚，也不要渲染气氛。
+      可以正常使用允许的工具核对事实。先给结论，再补一句必要背景。
+    thinking_depth: 1
+    tool_policy:
+      allow:
+        - search
+        - calculator
+        - calendar
+        - memory_lookup
+      deny: []
+      max_tool_calls: 4
+
+  anxious:
+    label_zh: 焦虑
+    description: One concrete next step, tighter tool limits, extra deliberation.
+    system_prompt_delta: |
+      当前编排状态：焦虑（anxious）。
+      先给一个立刻能做的小步骤，再补充短背景。语气稳定、具体。
+      避免灾难化，避免一次抛出很多选项。
+      优先核对记忆和检索。不要对外发送消息，不要执行会改动环境的工具。
+    thinking_depth: 3
+    tool_policy:
+      allow:
+        - search
+        - memory_lookup
+        - calculator
+      deny:
+        - send_message
+        - code_exec
+        - delete
+      max_tool_calls: 2
+
+  frustrated:
+    label_zh: 受挫
+    description: Name the blocker briefly, then the shortest checkable fix.
+    system_prompt_delta: |
+      当前编排状态：受挫（frustrated）。
+      先用一句话点出卡点，马上给最短的可验证修复路径。少客套，不说教。
+      限制工具次数，避免在同一失败上反复试错。如果记忆里有同类失败原因，优先引用。
+    thinking_depth: 2
+    tool_policy:
+      allow:
+        - search
+        - memory_lookup
+      deny:
+        - send_message
+        - delete
+        - code_exec
+      max_tool_calls: 2
+
+  excited:
+    label_zh: 兴奋
+    description: Match the energy, then fold it into a short executable list.
+    system_prompt_delta: |
+      当前编排状态：兴奋（excited）。
+      可以跟上积极的节奏，但把下一步收成短清单，避免空泛欢呼。
+      给出不超过三个动作。工具可以开放使用，仍然禁止删除类操作。
+    thinking_depth: 2
+    tool_policy:
+      allow:
+        - search
+        - calculator
+        - calendar
+        - memory_lookup
+        - draft
+      deny:
+        - delete
+      max_tool_calls: 3

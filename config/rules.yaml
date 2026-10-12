@@ -1,0 +1,25 @@
+# Keyword / regex rules for the offline detector.
+# Confidence = best / (best + second + 0.08).
+# A single clear category lands near 0.93; a tie stays near 0.5 and will not switch state.
+version: 1
+emotions:
+  calm:
+    - pattern: '平静|放松|还好|没事|稳住|谢谢|明白了|可以了|不急'
+      weight: 1.0
+    - pattern: '\b(calm|relaxed|fine|okay|ok|thanks|got it)\b'
+      weight: 1.0
+  anxious:
+    - pattern: '焦虑|担心|紧张|不安|害怕|来不及|怎么办|会不会|慌'
+      weight: 1.2
+    - pattern: '\b(anxious|worried|nervous|panic|afraid|deadline)\b'
+      weight: 1.2
+  frustrated:
+    - pattern: '受挫|烦死|好烦|烦人|生气|崩溃|失败|没用|为什么不行|搞不定|气死|卡住'
+      weight: 1.3
+    - pattern: '\b(frustrated|annoyed|angry|stuck|useless|furious)\b'
+      weight: 1.2
+  excited:
+    - pattern: '兴奋|太棒|太好了|激动|开心|好耶|终于|期待|冲啊'
+      weight: 1.2
+    - pattern: '\b(excited|awesome|amazing|pumped|yay)\b'
+      weight: 1.2
