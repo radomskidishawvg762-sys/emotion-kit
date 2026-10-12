@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emotion-kit"
+version = "0.1.0"
+description = "Behavioral emotion-orchestration middleware for OpenAI-compatible chat models."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "emotion-kit contributors" }]
+keywords = ["llm", "middleware", "emotion", "orchestration", "openai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+dependencies = [
+    "PyYAML>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+]
+
+[tool.setuptools.packages.find]
+include = ["emotion_kit*"]
+
+[tool.setuptools.package-data]
+emotion_kit = ["py.typed", "data/*.yaml", "data/*.yml", "data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

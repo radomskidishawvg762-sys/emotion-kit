@@ -1,0 +1,43 @@
+# Sample memories for the demo and tests. Replace or extend this list in your app.
+version: 1
+memories:
+  - id: mem-release-checklist
+    text: 发布会前只抓三件事：演示脚本、备用网络、回滚步骤。
+    tags: [发布会, 清单, 演示, 来不及]
+    metadata:
+      source: demo
+    emotion_affinity:
+      calm: 0.35
+      anxious: 0.95
+      frustrated: 0.40
+      excited: 0.45
+  - id: mem-env-failure
+    text: 上次连续失败是因为 OPENAI_BASE_URL 少了 /v1，补上后一次通过。
+    tags: [失败, 环境变量, 调试, 搞不定]
+    metadata:
+      source: demo
+    emotion_affinity:
+      calm: 0.20
+      anxious: 0.45
+      frustrated: 0.96
+      excited: 0.15
+  - id: mem-demo-win
+    text: 演示通过后先写三步收尾，再告诉同事，避免只停留在高兴。
+    tags: [演示, 成功, 收尾, 兴奋]
+    metadata:
+      source: demo
+    emotion_affinity:
+      calm: 0.40
+      anxious: 0.20
+      frustrated: 0.15
+      excited: 0.93
+  - id: mem-calm-close
+    text: 收尾顺序：核对清单、写一句结论、停止继续改动。
+    tags: [收尾, 清单, 结论, 平静]
+    metadata:
+      source: demo
+    emotion_affinity:
+      calm: 0.90
+      anxious: 0.25
+      frustrated: 0.30
+      excited: 0.35
