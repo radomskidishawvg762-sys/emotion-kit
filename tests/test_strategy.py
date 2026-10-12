@@ -20,14 +20,14 @@ def test_shipped_packs_cover_all_four_states() -> None:
     config = load_orchestration()
     assert set(config.states) == set(EMOTIONS)
     depths = {name: config.states[name].thinking_depth for name in EMOTIONS}
-    assert depths == {"calm": 1, "anxious": 3, "frustrated": 2, "excited": 2}
+    assert depths == {"calm": 1, "anxious": 2, "frustrated": 2, "excited": 2}
     anxious = config.states["anxious"]
     assert "焦虑" in anxious.system_prompt_delta
     assert anxious.tool_policy.max_tool_calls == 2
     assert anxious.tool_policy.allows("search")
     assert not anxious.tool_policy.allows("send_message")
     assert not anxious.tool_policy.allows("code_exec")
-    assert "thinking_depth=3" in anxious.render_for_prompt()
+    assert "thinking_depth=2" in anxious.render_for_prompt()
     assert set(config.weights) == set(EMOTIONS)
     assert config.base_system_prompt
 
@@ -35,7 +35,7 @@ def test_shipped_packs_cover_all_four_states() -> None:
 def test_override_replaces_one_field_and_keeps_the_rest() -> None:
     config = load_orchestration(overrides={"states": {"calm": {"thinking_depth": 4}}})
     assert config.states["calm"].thinking_depth == 4
-    assert config.states["anxious"].thinking_depth == 3
+    assert config.states["anxious"].thinking_depth == 2
     assert "平静" in config.states["calm"].system_prompt_delta
 
 
@@ -49,6 +49,34 @@ def test_json_config_directory_loads(tmp_path: Path) -> None:
     loaded = load_orchestration(tmp_path)
     assert loaded.states["frustrated"].label_zh == "受挫"
     assert loaded.detector.mode == "auto"
+
+
+def test_unknown_state_field_is_rejected() -> None:
+    def _payload(states: dict[str, object]) -> dict[str, object]:
+        return {
+            "base_system_prompt": "be precise",
+            "memory": {
+                "weights": {
+                    name: {"tag_overlap": 0.3, "affinity": 0.4, "recency": 0.3}
+                    for name in EMOTIONS
+                }
+            },
+            "states": states,
+        }
+
+    states = {
+        name: {"system_prompt_delta": "保持具体。", "thinking_depth": 1} for name in EMOTIONS
+    }
+    states["anxious"]["thinking_depht"] = 2
+    with pytest.raises(ValueError, match="thinking_depht"):
+        orchestration_from_dict(_payload(states))
+
+    states = {
+        name: {"system_prompt_delta": "保持具体。", "thinking_depth": 1} for name in EMOTIONS
+    }
+    states["calm"]["tool_policy"] = {"allow": ["search"], "max_tool_callz": 1}
+    with pytest.raises(ValueError, match="max_tool_callz"):
+        orchestration_from_dict(_payload(states))
 
 
 def test_missing_state_is_rejected() -> None:

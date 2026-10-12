@@ -114,6 +114,9 @@ def _interactive(orchestrator: Orchestrator, *, verbose: bool) -> int:
         except EOFError:
             print()
             return 0
+        except KeyboardInterrupt:
+            print()
+            return 0
         if not text:
             continue
         if text in {"/quit", "/exit", "quit", "exit"}:

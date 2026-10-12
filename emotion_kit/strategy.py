@@ -18,6 +18,10 @@ from emotion_kit.memory import RecallWeights
 from emotion_kit.state import EMOTIONS, DebounceConfig, Emotion, parse_emotion
 
 _MODES = ("rule", "llm", "auto")
+_STATE_KEYS = frozenset(
+    {"label_zh", "description", "system_prompt_delta", "thinking_depth", "tool_policy"}
+)
+_TOOL_POLICY_KEYS = frozenset({"allow", "deny", "max_tool_calls"})
 
 
 @dataclass(frozen=True)
@@ -215,7 +219,9 @@ def _parse_states(raw: Mapping[str, Any]) -> dict[Emotion, Strategy]:
         if name not in raw:
             raise ValueError(f"strategy pack missing state {name!r}")
         item = _mapping(raw[name], f"states.{name}")
+        _reject_unknown(item, _STATE_KEYS, f"states.{name}")
         policy_raw = _mapping(item.get("tool_policy") or {}, f"states.{name}.tool_policy")
+        _reject_unknown(policy_raw, _TOOL_POLICY_KEYS, f"states.{name}.tool_policy")
         policy = ToolPolicy(
             allow=_str_tuple(policy_raw.get("allow") or ()),
             deny=_str_tuple(policy_raw.get("deny") or ()),
@@ -250,6 +256,12 @@ def _parse_weights(raw: Mapping[str, Any]) -> dict[Emotion, RecallWeights]:
             recency=float(item.get("recency", 0.0)),
         )
     return weights
+
+
+def _reject_unknown(mapping: Mapping[str, Any], allowed: frozenset[str], label: str) -> None:
+    extra = sorted(set(mapping) - allowed)
+    if extra:
+        raise ValueError(f"{label} has unknown fields: {', '.join(extra)}")
 
 
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:

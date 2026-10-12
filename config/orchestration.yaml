@@ -71,7 +71,7 @@ states:
       先给一个立刻能做的小步骤，再补充短背景。语气稳定、具体。
       避免灾难化，避免一次抛出很多选项。
       优先核对记忆和检索。不要对外发送消息，不要执行会改动环境的工具。
-    thinking_depth: 3
+    thinking_depth: 2
     tool_policy:
       allow:
         - search
@@ -107,7 +107,7 @@ states:
     system_prompt_delta: |
       当前编排状态：兴奋（excited）。
       可以跟上积极的节奏，但把下一步收成短清单，避免空泛欢呼。
-      给出不超过三个动作。工具可以开放使用，仍然禁止删除类操作。
+      给出不超过三个动作。只用允许的工具：search、calculator、calendar、memory_lookup、draft。禁止删除。
     thinking_depth: 2
     tool_policy:
       allow:

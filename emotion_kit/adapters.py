@@ -6,7 +6,9 @@ The mock lets the whole pipeline run with no API key and no network.
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -18,8 +20,19 @@ CLASSIFY_MARKER = "EMOTION_KIT_CLASSIFY"
 Message = Mapping[str, str]
 
 
+# One try plus this many retries. Only timeouts and 429/502/503/504 are retried.
+_MAX_RETRIES = 2
+_RETRYABLE_HTTP = frozenset({429, 502, 503, 504})
+_BACKOFF_SECONDS = 0.2
+_DEFAULT_TIMEOUT = 90.0
+
+
 class LLMError(RuntimeError):
     """The chat endpoint failed or returned a payload we cannot read."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 @dataclass(frozen=True)
@@ -27,6 +40,7 @@ class LLMResult:
     content: str
     model: str
     raw: dict[str, Any] | None = None
+    usage: Mapping[str, Any] | None = None
 
 
 class LLMClient(Protocol):
@@ -53,7 +67,7 @@ class OpenAICompatibleClient:
         base_url: str,
         api_key: str,
         model: str,
-        timeout: float = 60.0,
+        timeout: float | None = None,
     ) -> None:
         if not base_url.strip():
             raise ValueError("base_url is required")
@@ -64,7 +78,7 @@ class OpenAICompatibleClient:
         self.base_url = base_url.strip().rstrip("/")
         self.api_key = api_key
         self.model = model
-        self.timeout = timeout
+        self.timeout = _resolve_timeout(timeout)
 
     @property
     def chat_url(self) -> str:
@@ -87,9 +101,23 @@ class OpenAICompatibleClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        body = json.dumps(payload).encode("utf-8")
+        last_error: LLMError | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                return self._post(body, model=chosen)
+            except LLMError as exc:
+                last_error = exc
+                if attempt >= _MAX_RETRIES or not exc.retryable:
+                    raise
+                time.sleep(_BACKOFF_SECONDS * (attempt + 1))
+        assert last_error is not None
+        raise last_error
+
+    def _post(self, body: bytes, *, model: str) -> LLMResult:
         request = urllib.request.Request(
             self.chat_url,
-            data=json.dumps(payload).encode("utf-8"),
+            data=body,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -99,15 +127,22 @@ class OpenAICompatibleClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read()
+                raw_body = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise LLMError(f"LLM HTTP {exc.code}: {detail}") from exc
+            raise LLMError(
+                f"LLM HTTP {exc.code}: {detail}",
+                retryable=exc.code in _RETRYABLE_HTTP,
+            ) from exc
         except urllib.error.URLError as exc:
-            raise LLMError(f"LLM connection failed: {exc.reason}") from exc
+            raise _error_from_cause(exc.reason) from exc
+        except TimeoutError as exc:
+            raise _error_from_cause(exc) from exc
+        except OSError as exc:
+            raise _error_from_cause(exc) from exc
 
         try:
-            parsed = json.loads(body.decode("utf-8"))
+            parsed = json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise LLMError("LLM response was not JSON") from exc
         if not isinstance(parsed, dict):
@@ -118,7 +153,13 @@ class OpenAICompatibleClient:
             raise LLMError(f"LLM response missing choices[0].message: {parsed!r}"[:400]) from exc
         if not isinstance(message, dict):
             raise LLMError("LLM message payload was not an object")
-        return LLMResult(content=_message_text(message), model=chosen, raw=parsed)
+        content = _message_text(message)
+        if not content.strip():
+            raise LLMError("LLM response content was empty")
+        usage = parsed.get("usage")
+        if not isinstance(usage, dict):
+            usage = None
+        return LLMResult(content=content, model=model, raw=parsed, usage=usage)
 
 
 class MockClient:
@@ -165,7 +206,35 @@ def _plain_message(message: Message) -> dict[str, str]:
     return {"role": role, "content": str(content)}
 
 
+def _resolve_timeout(explicit: float | None) -> float:
+    if explicit is not None:
+        if explicit <= 0:
+            raise ValueError("timeout must be > 0")
+        return float(explicit)
+    raw = os.environ.get("EMOTION_KIT_TIMEOUT")
+    if raw is None or not raw.strip():
+        return _DEFAULT_TIMEOUT
+    try:
+        value = float(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"EMOTION_KIT_TIMEOUT must be a number, got {raw.strip()!r}") from exc
+    if value <= 0:
+        raise ValueError("EMOTION_KIT_TIMEOUT must be > 0")
+    return value
+
+
+def _error_from_cause(reason: object) -> LLMError:
+    if isinstance(reason, TimeoutError):
+        return LLMError(f"LLM timeout: {reason}", retryable=True)
+    if isinstance(reason, ConnectionResetError):
+        return LLMError(f"LLM connection reset: {reason}")
+    if isinstance(reason, OSError):
+        return LLMError(f"LLM connection failed: {reason}")
+    return LLMError(f"LLM connection failed: {reason}")
+
+
 def _message_text(message: Mapping[str, Any]) -> str:
+    # ``reasoning_content`` is model scratch space, not the user-visible reply.
     content = message.get("content")
     if content is None:
         return ""
@@ -222,7 +291,7 @@ def _mock_classify(text: str) -> tuple[str, float, list[str]]:
     for emotion, hints in _MOCK_HINTS:
         hit = next((hint for hint in hints if hint.casefold() in folded), None)
         if hit is not None:
-            return emotion, 0.86, [hit]
+            return emotion, 0.93, [hit]
     return "calm", 0.4, []
 
 

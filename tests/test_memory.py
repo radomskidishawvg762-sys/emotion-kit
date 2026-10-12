@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from emotion_kit.memory import MemoryEntry, MemoryStore, RecallWeights, load_memories
+from emotion_kit.memory import MemoryEntry, MemoryStore, RecallWeights, load_memories, tag_overlap
 from emotion_kit.state import EMOTIONS, parse_emotion
 
 
@@ -68,6 +68,13 @@ def test_shipped_memories_load() -> None:
     assert checklist.emotion_affinity is not None
     assert checklist.emotion_affinity["anxious"] > checklist.emotion_affinity["calm"]
     assert checklist.metadata["source"] == "demo"
+
+
+def test_chinese_tag_matches_whole_tag_only() -> None:
+    entry = MemoryEntry("demo", "plain text", tags=("发布会", "清单"))
+    assert tag_overlap("会", entry) == 0
+    assert tag_overlap("单", entry) == 0
+    assert tag_overlap("发布会快到了", entry) > 0
 
 
 def test_missing_weight_row_is_rejected() -> None:

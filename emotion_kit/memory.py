@@ -52,7 +52,7 @@ def tokenize(text: str) -> set[str]:
 
 
 def tag_overlap(query: str, entry: MemoryEntry) -> float:
-    """Score in ``[0, 1]`` from tag hits plus a smaller text-token overlap."""
+    """Score in ``[0, 1]``. A tag counts only when the whole tag is a substring."""
 
     query_tokens = tokenize(query)
     folded = query.casefold()
@@ -60,7 +60,7 @@ def tag_overlap(query: str, entry: MemoryEntry) -> float:
         hits = 0
         for tag in entry.tags:
             tag_folded = tag.casefold()
-            if tag_folded and (tag_folded in folded or tokenize(tag) & query_tokens):
+            if tag_folded and tag_folded in folded:
                 hits += 1
         tag_score = hits / len(entry.tags)
     else:
